@@ -1,0 +1,721 @@
+<workflow-app xmlns='uri:oozie:workflow:0.5' name='oozie_workflow'>
+	<global>
+		<job-tracker>${jobTracker}</job-tracker>
+		<name-node>${nameNode}</name-node>
+		<job-xml>${runtime}/runtime_params.xml</job-xml>
+		<job-xml>tables_config.xml</job-xml>
+		<job-xml>ColumnTransformationRules.xml</job-xml>
+		<job-xml>HeadersAndTrailers.xml</job-xml>
+		<configuration>
+			<property>
+				<name>oozie.use.system.libpath</name>
+				<value>true</value>
+			</property>
+			<property>
+				<name>oozie.action.sharelib.for.java</name>
+				<value>hive</value>
+			</property>
+			<property>
+				<name>mapreduce.map.maxattempts</name>
+				<value>1</value>
+			</property>
+			<property>
+				<name>mapreduce.reduce.maxattempts</name>
+				<value>1</value>
+			</property>
+			<property>
+				<name>mapred.job.queue.name</name>
+				<value>${queueName}</value>
+			</property>
+			<property>
+				<name>mapreduce.input.fileinputformat.split.maxsize</name>
+				<value>134217728</value>
+			</property>
+			<property>
+				<name>mapreduce.map.output.compress</name>
+				<value>true</value>
+			</property>
+			<property>
+				<name>mapreduce.map.output.compress.codec</name>
+				<value>org.apache.hadoop.io.compress.SnappyCodec</value>
+			</property>
+			<property>
+				<name>mapreduce.output.fileoutputformat.compress</name>
+				<value>true</value>
+			</property>
+			<property>
+				<name>mapreduce.output.fileoutputformat.compress.codec</name>
+				<value>org.apache.hadoop.io.compress.SnappyCodec</value>
+			</property>
+			<property>
+				<name>ingfrm.hive.warehouse</name>
+				<value>${hiveWarehouseDataDir}</value>
+			</property>
+			<property>
+				<name>ingfrm.individual.tableprefix</name>
+				<value></value>
+			</property>
+			<property>
+				<name>ingfrm.cdccolumns</name>
+				<value>${cdcColumns}</value>
+			</property>
+			<property>
+				<name>ingfrm.rowcounts.database</name>
+				<value>${falcon_rowcounts_database}</value>
+			</property>
+			<property>
+				<name>ingfrm.rowcounts.table</name>
+				<value>${falcon_rowcounts_table}</value>
+			</property>
+			<property>
+				<name>ingfrm.rowcounts.partition</name>
+				<value>${falcon_rowcounts_partitions_java}
+				</value>
+			</property>
+			<property>
+				<name>ingfrm.rerun.table</name>
+				<value>${wf:conf('ingfrm.rerun.table')}</value>
+			</property>
+			<property>
+				<name>ingfrm.fixwidth</name>
+				<value>${fixWidth}</value>
+			</property>
+			<property>
+				<name>ingfrm.delimiter.framework</name>
+				<value>${frmDelimiter}</value>
+			</property>
+			<property>
+				<name>ingfrm.delimiter.data</name>
+				<value>${dataDelimiter}</value>
+			</property>
+			<property>
+				<name>ingfrm.hive.outputformat</name>
+				<value>${fileType}</value>
+			</property>
+		</configuration>
+	</global>
+
+	<start to="decision-validator" />
+
+	<decision name="decision-validator">
+		<switch>
+			<case to="validatorjava">${validatorType=="java"}</case>
+			<case to="validatorpig">${validatorType=="pig"}</case>
+			<case to="validatorhive">${validatorType=="hive"}</case>
+			<default to="index" />
+		</switch>
+	</decision>
+
+	<action name="validatorjava">
+		<java>
+			<configuration>
+				<property>
+					<name>ingfrm.input.database</name>
+					<value>${falcon_input_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.table</name>
+					<value>${falcon_input_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.partition</name>
+					<value>${falcon_input_partition_filter_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.validator.args</name>
+					<value>${validatorArgs}</value>
+				</property>
+				<property>
+					<name>ingfrm.output.path</name>
+					<value>${wf:conf('hadoop.tmp.dir')}/${falcon_validator_table}/${falcon_validator_dated_partition_value_fvds}
+					</value>
+				</property>
+			</configuration>
+			<main-class>${validatorCodeFile}</main-class>
+		</java>
+		<ok to="hive-add-partitions-after-validator" />
+		<error to="fail" />
+	</action>
+
+	<action name="validatorpig">
+		<pig>
+			<configuration>
+				<property>
+					<name>ingfrm.input.database</name>
+					<value>${falcon_input_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.table</name>
+					<value>${falcon_input_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.partition</name>
+					<value>${falcon_input_partition_filter_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.validator.args</name>
+					<value>${validatorArgs}</value>
+				</property>
+				<property>
+					<name>ingfrm.output.path</name>
+					<value>${wf:conf('hadoop.tmp.dir')}/${falcon_validator_table}/${falcon_validator_dated_partition_value_fvds}
+					</value>
+				</property>
+			</configuration>
+			<script>${validatorCodeFile}</script>
+		</pig>
+		<ok to="hive-add-partitions-after-validator" />
+		<error to="fail" />
+	</action>
+
+	<action name="validatorhive">
+		<hive xmlns="uri:oozie:hive-action:0.5">
+			<job-xml>${wf:appPath()}/conf/hive-site.xml</job-xml>
+			<job-xml>${wf:appPath()}/conf/tez-site.xml</job-xml>
+			<configuration>
+				<property>
+					<name>ingfrm.input.database</name>
+					<value>${falcon_input_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.table</name>
+					<value>${falcon_input_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.partition</name>
+					<value>${falcon_input_partition_filter_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.validator.args</name>
+					<value>${validatorArgs}</value>
+				</property>
+				<property>
+					<name>ingfrm.output.path</name>
+					<value>${wf:conf('hadoop.tmp.dir')}/${falcon_validator_table}/${falcon_validator_dated_partition_value_fvds}
+					</value>
+				</property>
+			</configuration>
+			<script>${validatorCodeFile}</script>
+		</hive>
+		<ok to="hive-add-partitions-after-validator" />
+		<error to="fail" />
+	</action>
+
+	<action name="hive-add-partitions-after-validator">
+		<hive xmlns="uri:oozie:hive-action:0.5">
+			<job-xml>${wf:appPath()}/conf/hive-site.xml</job-xml>
+			<job-xml>${wf:appPath()}/conf/tez-site.xml</job-xml>
+			<script>${wf:appPath()}/add_partitions_after_validator.hql
+			</script>
+			<param>param_dated_partition_value=${falcon_index_dated_partition_value_rds}
+			</param>
+		</hive>
+		<ok to="index" />
+		<error to="fail" />
+	</action>
+
+	<action name="index">
+		<java>
+			<configuration>
+				<property>
+					<name>ingfrm.input.database</name>
+					<value>${falcon_input_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.table</name>
+					<value>${falcon_input_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.partition</name>
+					<value>${falcon_input_partition_filter_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.index.database</name>
+					<value>${falcon_index_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.index.table</name>
+					<value>${falcon_index_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.index.partition</name>
+					<value>${falcon_index_partitions_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.rowhistory.database</name>
+					<value>${falcon_rowhistory_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.rowhistory.table</name>
+					<value>${falcon_rowhistory_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.rowhistory.partition</name>
+					<value>${falcon_rowhistory_partitions_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.output.path</name>
+					<value>${wf:conf('hadoop.tmp.dir')}/${falcon_input_table}/${falcon_index_dated_partition_value_rds}
+					</value>
+				</property>
+				<property>
+					<name>ingfrm.validator.type</name>
+					<value>${validatorType}</value>
+				</property>
+			</configuration>
+			<main-class>com.scb.ingfrm.index.index</main-class>
+		</java>
+		<ok to="hive-add-partitions-after-index" />
+		<error to="fail" />
+	</action>
+
+	<action name="hive-add-partitions-after-index">
+		<hive xmlns="uri:oozie:hive-action:0.5">
+			<job-xml>${wf:appPath()}/conf/hive-site.xml</job-xml>
+			<job-xml>${wf:appPath()}/conf/tez-site.xml</job-xml>
+			<script>${wf:appPath()}/add_partitions_after_index.hql
+			</script>
+			<param>param_dated_partition_value=${falcon_index_dated_partition_value_rds}
+			</param>
+		</hive>
+		<ok to="decision-datatransform" />
+		<error to="fail" />
+	</action>
+
+	<decision name="decision-datatransform">
+		<switch>
+			<case to="datatransform">${dataTransform=="REQUIRED"}</case>
+			<default to="decision-typevalidator" />
+		</switch>
+	</decision>
+
+	<action name="datatransform">
+		<java>
+			<configuration>
+				<property>
+					<name>ingfrm.input.database</name>
+					<value>${falcon_index_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.table</name>
+					<value>${falcon_index_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.partition</name>
+					<value>${falcon_index_partitions_java}
+					</value>
+				</property>
+				<property>
+					<name>ingfrm.datatransform.valid.database</name>
+					<value>${falcon_datatransformvalid_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.datatransform.valid.table</name>
+					<value>${falcon_datatransformvalid_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.datatransform.valid.partition</name>
+					<value>${falcon_datatransformvalid_partitions_java}
+					</value>
+				</property>
+				<property>
+					<name>ingfrm.datatransform.invalid.database</name>
+					<value>${falcon_datatransforminvalid_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.datatransform.invalid.table</name>
+					<value>${falcon_datatransforminvalid_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.datatransform.invalid.partition</name>
+					<value>${falcon_datatransforminvalid_partitions_java}
+					</value>
+				</property>
+				<property>
+					<name>ingfrm.output.path</name>
+					<value>${wf:conf('hadoop.tmp.dir')}/${falcon_index_table}/${falcon_index_dated_partition_value_rds}
+					</value>
+				</property>
+				<property>
+					<name>oozie.action.sharelib.for.java</name>
+					<value>hive,libserver</value>
+				</property>
+			</configuration>
+			<main-class>com.scb.ingfrm.datatransform.DataTransform</main-class>
+		</java>
+		<ok to="hive-add-partitions-after-datatransform" />
+		<error to="fail" />
+	</action>
+
+	<action name="hive-add-partitions-after-datatransform">
+		<hive xmlns="uri:oozie:hive-action:0.5">
+			<job-xml>${wf:appPath()}/conf/hive-site.xml</job-xml>
+			<job-xml>${wf:appPath()}/conf/tez-site.xml</job-xml>
+			<script>${wf:appPath()}/add_partitions_after_datatransform.hql
+			</script>
+			<param>param_dated_partition_value=${falcon_index_dated_partition_value_rds}
+			</param>
+		</hive>
+		<ok to="decision-typevalidator" />
+		<error to="fail" />
+	</action>
+
+	<decision name="decision-typevalidator">
+		<switch>
+			<case to="typevalidatorjava">${typeValidatorType=="java"}</case>
+			<case to="typevalidatorpig">${typeValidatorType=="pig"}</case>
+			<case to="typevalidatorhive">${typeValidatorType=="hive"}</case>
+			<default to="decision-sri" />
+		</switch>
+	</decision>
+
+	<action name="typevalidatorjava">
+		<java>
+			<configuration>
+				<property>
+					<name>ingfrm.input.database</name>
+					<value>${falcon_datatransformvalid_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.table</name>
+					<value>${falcon_datatransformvalid_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.partition</name>
+					<value>${falcon_datatransformvalid_partitions_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.validtypes.database</name>
+					<value>${falcon_verify_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.validtypes.table</name>
+					<value>${falcon_verify_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.validtypes.partition</name>
+					<value>${falcon_verify_partitions_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.invalidtypes.database</name>
+					<value>${falcon_invalid_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.invalidtypes.table</name>
+					<value>${falcon_invalid_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.invalidtypes.partition</name>
+					<value>${falcon_invalid_partitions_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.warntypes.database</name>
+					<value>${falcon_warn_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.warntypes.table</name>
+					<value>${falcon_warn_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.warntypes.partition</name>
+					<value>${falcon_warn_partitions_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.output.path</name>
+					<value>${wf:conf('hadoop.tmp.dir')}/${falcon_index_table}/${falcon_index_dated_partition_value_rds}
+					</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.onetable</name>
+					<value>${wf:conf('SRIStep')}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.args</name>
+					<value>${typeValidatorArgs}</value>
+				</property>
+			</configuration>
+			<main-class>${typeValidatorCodeFile}</main-class>
+		</java>
+		<ok to="hive-add-partitions-after-typevalidator" />
+		<error to="fail" />
+	</action>
+
+	<action name="typevalidatorhive">
+		<hive xmlns="uri:oozie:hive-action:0.5">
+			<job-xml>${wf:appPath()}/conf/hive-site.xml</job-xml>
+			<job-xml>${wf:appPath()}/conf/tez-site.xml</job-xml>
+			<configuration>
+				<property>
+					<name>ingfrm.input.database</name>
+					<value>${falcon_datatransformvalid_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.table</name>
+					<value>${falcon_datatransformvalid_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.partition</name>
+					<value>${falcon_datatransformvalid_partitions_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.validtypes.database</name>
+					<value>${falcon_verify_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.validtypes.table</name>
+					<value>${falcon_verify_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.validtypes.partition</name>
+					<value>${falcon_verify_partitions_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.invalidtypes.database</name>
+					<value>${falcon_invalid_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.invalidtypes.table</name>
+					<value>${falcon_invalid_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.invalidtypes.partition</name>
+					<value>${falcon_invalid_partitions_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.warntypes.database</name>
+					<value>${falcon_warn_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.warntypes.table</name>
+					<value>${falcon_warn_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.warntypes.partition</name>
+					<value>${falcon_warn_partitions_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.output.path</name>
+					<value>${wf:conf('hadoop.tmp.dir')}/${falcon_index_table}/${falcon_index_dated_partition_value_rds}
+					</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.onetable</name>
+					<value>${wf:conf('SRIStep')}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.args</name>
+					<value>${typeValidatorArgs}</value>
+				</property>
+			</configuration>
+			<script>${typeValidatorCodeFile}</script>
+		</hive>
+		<ok to="hive-add-partitions-after-typevalidator" />
+		<error to="fail" />
+	</action>
+
+	<action name="typevalidatorpig">
+		<pig>
+			<configuration>
+				<property>
+					<name>ingfrm.input.database</name>
+					<value>${falcon_datatransformvalid_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.table</name>
+					<value>${falcon_datatransformvalid_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.partition</name>
+					<value>${falcon_datatransformvalid_partitions_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.validtypes.database</name>
+					<value>${falcon_verify_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.validtypes.table</name>
+					<value>${falcon_verify_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.validtypes.partition</name>
+					<value>${falcon_verify_partitions_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.invalidtypes.database</name>
+					<value>${falcon_invalid_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.invalidtypes.table</name>
+					<value>${falcon_invalid_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.invalidtypes.partition</name>
+					<value>${falcon_invalid_partitions_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.warntypes.database</name>
+					<value>${falcon_warn_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.warntypes.table</name>
+					<value>${falcon_warn_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.warntypes.partition</name>
+					<value>${falcon_warn_partitions_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.output.path</name>
+					<value>${wf:conf('hadoop.tmp.dir')}/${falcon_index_table}/${falcon_index_dated_partition_value_rds}
+					</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.onetable</name>
+					<value>${wf:conf('SRIStep')}</value>
+				</property>
+				<property>
+					<name>ingfrm.typevalidator.args</name>
+					<value>${typeValidatorArgs}</value>
+				</property>
+			</configuration>
+			<script>${typeValidatorCodeFile}</script>
+		</pig>
+		<ok to="hive-add-partitions-after-typevalidator" />
+		<error to="fail" />
+	</action>
+
+	<action name="hive-add-partitions-after-typevalidator">
+		<hive xmlns="uri:oozie:hive-action:0.5">
+			<job-xml>${wf:appPath()}/conf/hive-site.xml</job-xml>
+			<job-xml>${wf:appPath()}/conf/tez-site.xml</job-xml>
+			<script>${wf:appPath()}/add_partitions_after_typevalidation.hql
+			</script>
+			<param>param_dated_partition_value=${falcon_index_dated_partition_value_rds}
+			</param>
+		</hive>
+		<ok to="decision-sri" />
+		<error to="fail" />
+	</action>
+
+	<decision name="decision-sri">
+		<switch>
+			<case to="sri">${wf:conf('SRIStep')}</case>
+			<default to="end" />
+		</switch>
+	</decision>
+
+	<action name="sri">
+		<java>
+			<configuration>
+				<property>
+					<name>ingfrm.input.database</name>
+					<value>${falcon_verify_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.table</name>
+					<value>${falcon_verify_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.partition</name>
+					<value>${falcon_verify_partitions_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.input.partition.previous</name>
+					<value>${falcon_verifyprevious_partitions_java}</value>
+				</property>
+				<property>
+					<name>ingfrm.output.path</name>
+					<value>${wf:conf('hadoop.tmp.dir')}/${falcon_verify_table}/${falcon_index_dated_partition_value_rds}
+					</value>
+				</property>
+				<property>
+					<name>ingfrm.open.database</name>
+					<value>ifrs_sri_open</value>
+				</property>
+				<property>
+					<name>ingfrm.open.partition</name>
+					<value>'ods=${falcon_index_dated_partition_value_rds}'
+					</value>
+				</property>
+				<property>
+					<name>ingfrm.open.partition.previous</name>
+					<value>'ods=${falcon_verifyprevious_dated_partition_value_vds}'
+					</value>
+				</property>
+				<property>
+					<name>ingfrm.nonopen.database</name>
+					<value>ifrs_sri_nonopen</value>
+				</property>
+				<property>
+					<name>ingfrm.nonopen.partition</name>
+					<value>'nds=${falcon_index_dated_partition_value_rds}'
+					</value>
+				</property>
+				<property>
+					<name>ingfrm.duplicatedrows.database</name>
+					<value>${falcon_duplicates_database}</value>
+				</property>
+				<property>
+					<name>ingfrm.duplicatedrows.table</name>
+					<value>${falcon_duplicates_table}</value>
+				</property>
+				<property>
+					<name>ingfrm.duplicatedrows.partition</name>
+					<value>${falcon_duplicates_partitions_java}</value>
+				</property>
+			</configuration>
+			<main-class>com.scb.ingfrm.sri.SRI</main-class>
+		</java>
+		<ok to="hive-add-partitions-after-sri" />
+		<error to="fail" />
+	</action>
+
+	<action name="hive-add-partitions-after-sri">
+		<hive xmlns="uri:oozie:hive-action:0.5">
+			<job-xml>${wf:appPath()}/conf/hive-site.xml</job-xml>
+			<job-xml>${wf:appPath()}/conf/tez-site.xml</job-xml>
+			<script>${wf:appPath()}/add_partitions_after_sri.hql
+			</script>
+			<param>param_dated_partition_value=${falcon_index_dated_partition_value_rds}
+			</param>
+		</hive>
+		<ok to="decision-postprocessing" />
+		<error to="fail" />
+	</action>
+
+	<decision name="decision-postprocessing">
+		<switch>
+			<case to="postprocessing">${wf:conf('postProcessingType')=="ebbs"
+				}
+			</case>
+			<default to="end" />
+		</switch>
+	</decision>
+
+	<action name="postprocessing">
+		<java>
+			<main-class>${postProcessingCodeFile}</main-class>
+		</java>
+		<ok to="hive-add-partitions-after-postprocessing" />
+		<error to="fail" />
+	</action>
+
+	<action name="hive-add-partitions-after-postprocessing">
+		<hive xmlns="uri:oozie:hive-action:0.5">
+			<script>${wf:appPath()}/add_partitions_after_postprocessing.hql
+			</script>
+			<param>param_dated_partition_value=${wf:conf('ingfrm.sri.nextworkingdate')}
+			</param>
+		</hive>
+		<ok to="end" />
+		<error to="fail" />
+	</action>
+
+	<kill name="fail">
+		<message>Java failed, error
+			message[${wf:errorMessage(wf:lastErrorNode())}]
+		</message>
+	</kill>
+
+	<end name="end" />
+</workflow-app>
